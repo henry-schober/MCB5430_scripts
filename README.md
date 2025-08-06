@@ -1,0 +1,1 @@
+This repositories main purpose is to showcase all of the scripts and pipelines I created and used while in my MCB5430 class. This repo contains both a ChIP seq and RNA seq pipeline.
