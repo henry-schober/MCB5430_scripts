@@ -1,0 +1,156 @@
+---
+title: "HW3"
+author: "Henry Schober"
+date: "2024-11-19"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+# Question 1
+
+## Distribution of peak and motif distances to gene transcription start sites
+
+### Getting the original files using bash
+
+```{bash, eval=FALSE, echo=TRUE}
+module load bedtools
+
+# sort the TSS file first before bedtools
+
+sort -k1,1 -k2,2n hg38_TSS_uniq.bed > hg38_TSS_uniq_sorted.bed
+
+# summits
+
+bedtools closest -D b -a ATF1_summits_chr1.bed -b hg38_TSS_uniq_sorted.bed > ATF1_summits_closestTSS.txt
+
+# motif
+# fimo file out of order so sort that first
+sort -k1,1 -k2,2n fimo_ATF1_chr1.bed > fimo_ATF1_chr1_sorted.bed
+
+bedtools closest -D b -a fimo_ATF1_chr1_sorted.bed -b hg38_TSS_uniq_sorted.bed > ATF1_motif_closestTSS.txt
+```
+
+### Plotting The distributions
+
+```{r, error=TRUE}
+# Box Plot
+
+closest_summits <- read.table("ATF1_summits_closestTSS.txt", stringsAsFactors = F)
+closest_motifs <- read.table("ATF1_motif_closestTSS.txt", stringsAsFactors = F)
+
+
+boxplot(closest_motifs[,13], closest_summits[,12], outline=F, border='black', col=c('green', 'blue'), lwd=2, names=c('Motifs', 'Summits'), ylab= 'Distance', main='Peak and motif distances to the TSS')
+
+# CDF plot
+
+motif_cdf <- ecdf(closest_motifs[,13])
+summits_cdf <- ecdf(closest_summits[,12])
+
+
+plot(motif_cdf, xlim=c(-100000, 100000), col='green', main= "CDF plot of peaks and motif distances to TSS", lwd =3, ylab="Fraction", xlab="Distances") + lines(summits_cdf, col='blue', lwd=2) + legend("topleft", legend = c("Motif", "Summits"), text.col = c("green", "blue"))
+
+#This plotting system has a weird interaction in R markdown.
+
+```
+
+# Question 2
+
+## Plotting a Pie Chart
+
+### Bedtool pre processing
+
+```{bash, eval=FALSE, echo=TRUE}
+# prepare the file for pie chart
+
+#summits
+
+bedtools annotate -i ATF1_summits_chr1.bed -files hg38_promoters.bed hg38_geneBody.bed hg38_intergenic.bed -names promoter gene intergenic > ATF1_summits_overlap.txt
+
+#motifs
+
+bedtools annotate -i fimo_ATF1_chr1.bed -files hg38_promoters.bed hg38_geneBody.bed hg38_intergenic.bed -names promoter gene intergenic > ATF1_motifs_overlap.txt
+
+```
+
+### Creating the pie chart
+
+```{r}
+# Labels and color palette
+
+lbls <- c("promoter", "gene", "intergenic")
+cbPalette <- c("orchid", "#E69F00", "#56B4E9")
+
+
+#Summits pie chart
+
+summits_overlaps <- read.table("ATF1_summits_overlap.txt", stringsAsFactors = F)
+
+overlaps_sum_df <- data.frame(region = c("promoter", "gene", "intergenic"), count = c(sum(summits_overlaps[,6]),sum(summits_overlaps[,7]), sum(summits_overlaps[,8])))
+
+pct <- round((overlaps_sum_df[,2]/sum(overlaps_sum_df[,2]))*100)
+lbls2 <- paste(lbls, " ", pct, "%", sep = "")
+
+pie(overlaps_sum_df$count, labels=lbls2, main="Peaks percentage in the regions", col = cbPalette)
+
+#Motifs pie chart
+
+motifs_overlaps <- read.table("ATF1_motifs_overlap.txt", stringsAsFactors = F)
+
+overlaps_motif_df <- data.frame(region = c("promoter", "gene", "intergenic"), count = c(sum(motifs_overlaps[,7]),sum(motifs_overlaps[,8]), sum(motifs_overlaps[,9])))
+
+pct2 <- round((overlaps_motif_df[,2]/sum(overlaps_motif_df[,2]))*100)
+lbls3 <- paste(lbls, " ", pct2, "%", sep = "")
+
+pie(overlaps_motif_df$count, labels=lbls3, main="Motif percentage in the regions", col = cbPalette)
+
+
+```
+
+# Question 3
+
+## Composite profile of ChIP seq data
+
+### File preparation 
+
+```{bash, eval=FALSE, echo=TRUE}
+# creating the bed files
+module load bedtools
+module load samtools
+module load deeptools
+
+# in peaks
+bedtools slop -b 2000 -g /home/FCAM/mcb5430/MCB5430/genomes/hg38/hg38_chromInfo_base.txt -i  fimo_ATF1_INpeak.txt > in_peaks_2kb.bed
+
+#must index file
+samtools index -b  -@ 4 ATF1_chip_rep1.bam ATF1_chip_rep1.bai
+
+bamCoverage -b ATF1_chip_rep1.bam --binSize 50 -o ATF1_chip_rep1.bw
+
+# Deep tools
+
+# in peaks
+bedtools slop -b 2000 -g /home/FCAM/mcb5430/MCB5430/genomes/hg38/hg38_chromInfo_base.txt -i  fimo_ATF1_INpeak.txt > in_peaks_2kb.bed
+
+computeMatrix reference-point -p 6 -S ATF1_chip_rep1.bw -R in_peaks_2kb.bed -o in_peaks_2kb.matrix.gz --referencePoint center -b 2000 -a 2000 -bs 50 --missingDataAsZero
+
+#out peaks
+bedtools slop -b 2000 -g /home/FCAM/mcb5430/MCB5430/genomes/hg38/hg38_chromInfo_base.txt -i  fimo_ATF1_OUTSIDEpeak.txt > outside_peaks_2kb.bed
+
+computeMatrix reference-point -p 6 -S ATF1_chip_rep1.bw -R outside_peaks_2kb.bed -o outside_peaks_2kb.matrix.gz --referencePoint center -b 2000 -a 2000 -bs 50 --missingDataAsZero
+
+# making the plots
+
+plotProfile -m outside_peaks_2kb.matrix.gz -o outside_peaks.png --yAxisLabel "mean signal"   --samplesLabel "The outside peaks with a distance of 2kb"   --colors grey red  --plotType se --refPointLabel "0"  --regionsLabel "Outside"
+
+plotProfile -m in_peaks_2kb.matrix.gz -o in_peaks.png --yAxisLabel "mean signal"   --samplesLabel "The inside peaks with a distance of 2kb"   --colors grey red  --plotType se --refPointLabel "0"  --regionsLabel "Inside"
+
+plotHeatmap -m outside_peaks_2kb.matrix.gz -o outside_heatmap.png --regionsLabel 'Outside peaks' --xAxisLabel 'Distance to Peak Center' --refPointLabel "0" --samplesLabel "Outside peaks with distance to peak center" --colorMap Greys Reds
+
+plotHeatmap -m in_peaks_2kb.matrix.gz -o in_heatmap.png --regionsLabel 'Inside peaks' --xAxisLabel 'Distance to Peak Center' --refPointLabel "0" --samplesLabel "Inside peaks with distance to peak center" --colorMap Greys Reds
+
+```
+
+
+
+
