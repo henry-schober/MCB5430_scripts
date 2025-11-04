@@ -7,7 +7,7 @@
 
 
 <p align="center">
-<img src="./CDF_fInal.png" alt="CDF" width="600" align="center"/>
+<img src="./CDF_FInal.png" alt="CDF" width="600" align="center"/>
 </p>
 
 
