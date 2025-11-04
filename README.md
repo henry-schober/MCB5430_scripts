@@ -46,3 +46,7 @@ The example ChIP-seq pipeline I built uses the following tools:
 - TomTom
     - Comparison of discovered motifs to known motifs in databases
 
+
+
+### All of these visualizations can be found in [Visualizations](./Visualizations/Graphs.md).
+
