@@ -1,0 +1,304 @@
+---
+title: "HS_Final_Markdown"
+author: "Henry Schober"
+date: "2024-12-14"
+output: html_document
+---
+
+
+# Part 1
+
+```{r}
+library(ggplot2)
+library(LSD)
+# reading the tables
+
+treated_rep1 <- read.table("E2_rep1_abun.tab", header = T, sep="\t", stringsAsFactors = F)
+treated_rep2 <- read.table("E2_rep2_abun.tab", header = T, sep="\t", stringsAsFactors = F)
+untreated_rep1 <- read.table("untr_rep1_abun.tab", header = T, sep="\t", stringsAsFactors = F)
+untreated_rep2 <- read.table("untr_rep2_abun.tab", header = T, sep="\t", stringsAsFactors = F)
+
+#psuedo the data so we can create the abline for the data as we can't have 0 in the data
+psuedo_tr_1 <- treated_rep1[, 8] + 1
+psuedo_tr_2 <- treated_rep2[, 8] + 1
+psuedo_untr_1 <- untreated_rep1[, 8] + 1
+psuedo_untr_2 <- untreated_rep2[, 8] + 1
+
+#scatter plot
+
+#Treated
+
+heatscatter(log2(treated_rep1$FPKM), log2(treated_rep2$FPKM), pch = 20, cex=0.2, cor = T,
+            xlab = "Treated Replicate 1", ylab = "Treated Replicate 2", 
+            main = "Treated Replicates") 
+
+model <- lm(log2(psuedo_tr_1) ~ log2(psuedo_tr_2))
+abline(model, col = "black", lwd=0.5)
+dev.copy(jpeg, filename="Treated_Replicates_Scatter.jpeg")
+dev.off()
+
+#Untreated
+
+heatscatter(log2(untreated_rep1$FPKM), log2(untreated_rep2$FPKM), pch = 20, cex=0.2, cor = T,
+            xlab = "Untreated Replicate 1", ylab = "Untreated Replicate 2", 
+            main = "Untreated Replicates") 
+
+model <- lm(log2(psuedo_untr_1) ~ log2(psuedo_untr_2))
+abline(model, col = "black", lwd=0.5)
+dev.copy(jpeg, filename="Untreated_Replicates_Scatter.jpeg")
+dev.off()
+```
+
+## 1.2
+
+For this part I searched for the UP regulated gene NM_002631 
+
+
+# Part 2
+
+```{r}
+# Part 2 Differential Gene Expression Analysis
+
+#Set working Directory
+setwd("//wsl.localhost/Ubuntu/home/henrys/MCB_5430/final/DE_tables")
+
+# 2.1
+
+library(DESeq2)
+library(ggrepel)
+library(clusterProfiler)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+
+#create empty matrix to fill with our data
+
+samples <- c( "E2_rep1", "E2_rep2", "untr_rep1", "untr_rep2")
+conditions <- c("Treated", "Treated", "Untreated", "Untreated")
+counts <- as.matrix(read.csv("E2_gene_matrix.csv", row.names = "gene_id"))
+
+head(counts)
+
+# DESeq
+
+dds <- DESeqDataSetFromMatrix(countData = as.matrix(counts), colData = as.data.frame(conditions), design = ~ conditions)
+
+dds <- DESeq(dds)
+
+dds
+
+#Results
+
+res <- results(dds, alpha=0.05)
+
+head(res)
+
+res <- res[order(res$padj),]
+
+resdata <- merge(as.data.frame(res), as.data.frame(counts(dds, normalized=TRUE)), by = 'row.names', sort=FALSE)
+names(resdata)[1] <- 'gene'
+
+head(resdata,3)
+
+#remove na's
+res.narm <- na.omit(resdata)
+
+dim(res.narm)
+
+#select for significant genes
+sig.res <- res.narm[res.narm$padj<0.05,]
+dim(sig.res)
+
+#differentiate between up and down regulated genes
+sig.res.up <- sig.res[sig.res$log2FoldChange>0,]
+sig.res.down <- sig.res[sig.res$log2FoldChange<0,]
+
+dim(sig.res.down)
+dim(sig.res.up)
+
+# 2.2
+
+#log transform the data
+
+logdds <- rlogTransformation(dds, blind=F)
+head(logdds)
+
+# PCA plots
+
+PCA_plot <- plotPCA(logdds, intgroup=c('conditions')) + geom_label(aes(label = samples), nudge_y = 5) +
+  labs(title = "PCA plot of Treated vs Untreated replicates")
+PCA_plot
+
+#2.3 MA plots
+
+#Can be done two ways,  through plotMA
+
+plotMA(dds, alpha=0.05, ylim=c(-28,28))
+
+# or Manually, can change the colors of based off of significance, Up is Blue while Down genes are Green
+
+
+plot(log2(res.narm$baseMean), res.narm$log2FoldChange, pch=20, cex=.5, main = "MA plot on changed genes", xlab = "Counts", ylab = "Log Fold Change")
+points(log2(sig.res$baseMean), sig.res$log2FoldChange, pch=20, col='red')
+points(log2(sig.res.up$baseMean), sig.res.up$log2FoldChange, pch=20, col='blue')
+points(log2(sig.res.down$baseMean), sig.res.down$log2FoldChange, pch=20, col='green')
+legend("topright",
+       legend = c("Up regulated", "Down regulated"),
+       col = c("blue", "green"),
+       pch = 20)
+dev.copy(jpeg, filename="Final_MA.jpeg")
+dev.off()
+
+
+# 2.4
+
+#reformat this for splitting, splitting the refseq gene ID's from Gene name
+E2genes_all <- as.character(sapply(resdata$gene, function(x) unlist(strsplit(x, split="[|]"))[2]))
+
+E2genes_up <- as.character(sapply(sig.res.up$gene, function(x) unlist(strsplit(x, split="[|]"))[2]))
+
+E2genes_down <- as.character(sapply(sig.res.down$gene, function(x) unlist(strsplit(x, split="[|]"))[2]))
+
+E2genes_allc <- as.character(E2genes_all)
+E2genes_upc <- as.character(E2genes_up)
+E2genes_downc <- as.character(E2genes_down)
+
+# 2.5 converting refseq ID's to entrez IDs
+
+all_entrezID <- unique(mapIds(x= org.Hs.eg.db, column = "ENTREZID", keytype = "REFSEQ", multiVals = "first", keys = E2genes_allc))
+
+up_entrezID <- unique(mapIds(x= org.Hs.eg.db, column = "ENTREZID", keytype = "REFSEQ", multiVals = "first", keys = E2genes_upc))
+
+down_entrezID <- unique(mapIds(x= org.Hs.eg.db, column = "ENTREZID", keytype = "REFSEQ", multiVals = "first", keys = E2genes_downc))
+
+# enrichment from cluster profiler with the 3 options; BP, MF, CC
+
+#BP
+
+up_go_enrich_BP <- enrichGO(gene = up_entrezID, universe = all_entrezID,
+                         OrgDb = "org.Hs.eg.db", keyType = "ENTREZID", readable = T,
+                         ont = "BP", pAdjustMethod = "fdr", qvalueCutoff = 0.05)
+
+down_go_enrich_BP <- enrichGO(gene = down_entrezID, universe = all_entrezID,
+                         OrgDb = "org.Hs.eg.db", keyType = "ENTREZID", readable = T,
+                         ont = "BP", pAdjustMethod = "fdr", qvalueCutoff = 0.05)
+
+#MF
+
+up_go_enrich_MF <- enrichGO(gene = up_entrezID, universe = all_entrezID,
+                            OrgDb = "org.Hs.eg.db", keyType = "ENTREZID", readable = T,
+                            ont = "MF", pAdjustMethod = "fdr", qvalueCutoff = 0.05)
+
+down_go_enrich_MF <- enrichGO(gene = down_entrezID, universe = all_entrezID,
+                              OrgDb = "org.Hs.eg.db", keyType = "ENTREZID", readable = T,
+                              ont = "MF", pAdjustMethod = "fdr", qvalueCutoff = 0.05)
+
+#CC 
+
+up_go_enrich_CC <- enrichGO(gene = up_entrezID, universe = all_entrezID,
+                            OrgDb = "org.Hs.eg.db", keyType = "ENTREZID", readable = T,
+                            ont = "CC", pAdjustMethod = "fdr", qvalueCutoff = 0.05)
+
+down_go_enrich_CC <- enrichGO(gene = down_entrezID, universe = all_entrezID,
+                              OrgDb = "org.Hs.eg.db", keyType = "ENTREZID", readable = T,
+                              ont = "CC", pAdjustMethod = "fdr", qvalueCutoff = 0.05)
+
+head(as.data.frame(up_go_enrich_BP))
+head(as.data.frame(up_go_enrich_MF))
+head(as.data.frame(up_go_enrich_CC))
+
+# Bar plots
+
+barplot(up_go_enrich_BP, showCategory = 20, title = "BP UP regulated enrichment",
+        font.size = 4, label_format = 30)
+
+barplot(down_go_enrich_BP, showCategory = 20, title = "BP Down regulated enrichment",
+        font.size = 4, label_format = 30)
+
+barplot(up_go_enrich_MF, showCategory = 20, title = "MF UP regulated enrichment",
+        font.size = 4, label_format = 30)
+
+barplot(down_go_enrich_MF, showCategory = 20, title = "MF Down regulated enrichment",
+        font.size = 4, label_format = 30)
+
+barplot(up_go_enrich_CC, showCategory = 20, title = "CC UP regulated enrichment",
+        font.size = 4, label_format = 30)
+
+barplot(down_go_enrich_CC, showCategory = 20, title = "CC Down regulated enrichment",
+        font.size = 4, label_format = 30)
+
+```
+
+## Answer to 2.6
+
+Given what I know about estradiol and estrogen itself, I believe that the Up regulated genes under the BP category best match the known functions of these genes. This is because Estradiol is a primary growth hormone, and the largest Gene ratio that we see has to do with gland development, as well as mammary gland development was also one of the top clusters. There was a lot of mammary gland development in this enrichment.
+
+# Part 3
+
+```{r}
+# Part 3: COmparing ChIP-seq with regulated genes
+setwd("//wsl.localhost/Ubuntu/home/henrys/MCB_5430/final")
+
+library(ggplot2)
+
+#read closest TSS file into R
+
+closest <- read.table("E2_summits_closestTSS.txt", stringsAsFactors = F)
+head(closest)
+
+unique(closest[,1])
+
+#Create list of files without NA values
+
+E2genes_all_narm <- sapply(res.narm$gene, function(x) unlist(strsplit(x, split="[|]"))[2])
+
+combinedv2 <- cbind(res.narm, E2genes_all_narm)
+
+#created non regulated gene list, up regulated, and down regulated gene list
+
+non.sig.v2 <- combinedv2[combinedv2$padj>0.05,]
+sig.res.v2 <- combinedv2[combinedv2$padj<0.05,]
+sig.res.up.v2 <- sig.res.v2[sig.res.v2$log2FoldChange>0,]
+sig.res.down.v2 <- sig.res.v2[sig.res.v2$log2FoldChange<0,]
+
+#created a new column in the data frame determining regulation type
+
+combinedv2$regulation <- ifelse(combinedv2$padj < 0.05 & combinedv2$log2FoldChange > 0, "Upregulated", 
+                                ifelse(combinedv2$padj < 0.05 & combinedv2$log2FoldChange < 0, "Downregulated", "Nonregulated"))
+
+#merged by TSS gene list with this data frame
+
+combinedv2_merged <- merge(combinedv2, closest, by.x = "E2genes_all_narm", by.y = "V9", all.y = TRUE)
+
+merged_narm <- na.omit(combinedv2_merged)
+
+#CDF plot
+
+CDF_plot <- ggplot(merged_narm, aes(V12, color = regulation, fill = regulation)) +
+  stat_ecdf(geom = "step") + 
+  coord_cartesian(xlim = c(-500000, 500000)) + 
+  labs(title = "CDF plot of Up, Down, and Non regulated Genes", 
+       x = "Distance (bp) to nearest Gene", 
+       y = "CDF")
+CDF_plot
+
+#Boxplot
+
+Box_plot <- ggplot(merged_narm, aes(x = regulation, y = V12, color=regulation)) + geom_boxplot(aes(fill=regulation)) +
+  coord_cartesian(ylim = quantile(merged_narm$V12, c(0.1, 0.9))) + 
+  scale_fill_brewer(palette="BuPu") +
+  labs(title = "Boxplot of Distances between ChIP-seq peaks vs Up, Down, and Non regulated", 
+       y = "Distance (bp)", 
+       x = "Category of regulation")
+
+Box_plot
+
+```
+
+## Part 3.4
+
+
+I believe that the transcription factors binds mostly to promoters as we can see in the box plot, a majority of observations were seen at a close distance to the TSS. This is especially true for downregulated genes as these were the closest to the TSS. With the CDF plot, we also see a extremely steep slope at around 0 bp from the TSS meaning that it binds to a promoter. The Down regulated genes are seen again to have a steeper increase, meaning that these genes are more likely to bind to a promoter. Yes this is what we would expect out of a transcription factor as promoter regions are where transcription begins at the TSS, where transcription factors usually interact with the DNA and regulate gene expression.
+
+
+
+
